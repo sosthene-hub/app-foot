@@ -39,17 +39,16 @@ if api_key:
                 sel_season = st.selectbox("Saison", [2024, 2023, 2022])
             
             if st.button("🚀 CHARGER LES STATISTIQUES"):
-                with st.spinner("Appel API en cours..."):
+                with st.spinner("Récupération des données API..."):
                     result = scraper.get_standings(league_map[sel_div], sel_season)
                     
                     if isinstance(result, pd.DataFrame):
                         st.session_state.df_stats = result
-                        st.success(f"✅ {len(result)} équipes chargées !")
+                        st.success(f"✅ {len(result)} équipes prêtes pour l'analyse !")
                     else:
-                        # Si ce n'est pas un DataFrame, c'est un message d'erreur
-                        st.error(f"Détails : {result}")
+                        st.error(f"{result}")
     else:
-        st.sidebar.error("❌ Clé API non reconnue.")
+        st.sidebar.error("❌ Clé API invalide ou quota épuisé.")
 
 # --- ZONE D'ANALYSE ---
 if st.session_state.df_stats is not None:
@@ -67,22 +66,37 @@ if st.session_state.df_stats is not None:
     with c_odds:
         st.subheader("⚖️ Cotes Bookmaker")
         o1, oN, o2 = st.columns(3)
-        c1 = o1.number_input("Cote 1", value=2.0)
-        cN = oN.number_input("Cote N", value=3.0)
-        c2 = o2.number_input("Cote 2", value=3.0)
+        c1 = o1.number_input("Cote 1", value=2.0, step=0.01)
+        cN = oN.number_input("Cote N", value=3.0, step=0.01)
+        c2 = o2.number_input("Cote 2", value=3.0, step=0.01)
         
         o_v, o_b = st.columns(2)
-        cOver = o_v.number_input("Cote Over 2.5", value=1.85)
-        cBTTS = o_b.number_input("Cote BTTS (Oui)", value=1.75)
+        cOver = o_v.number_input("Cote Over 2.5", value=1.85, step=0.01)
+        cBTTS = o_b.number_input("Cote BTTS (Oui)", value=1.75, step=0.01)
 
     if st.button("🔍 ANALYSER LA VALUE"):
         try:
+            # Calcul des forces
             strengths, avg_h, avg_a = calculate_global_strengths(df)
+            
+            # Prédiction
             matrix = predict_match_matrix(home, away, strengths, avg_h, avg_a)
+            
+            # Analyse des marchés
             results = analyze_all_markets(matrix, {'1': c1, 'N': cN, '2': c2, 'Over 2.5': cOver, 'BTTS (Oui)': cBTTS})
             
             results['IA Proba (%)'] = (results['Prob_IA'] * 100).round(1)
-            st.success(f"Conseil : {results.iloc[0]['Market']}")
+            
+            st.write(f"### 🎯 Analyse : {home} vs {away}")
+            
+            # Affichage du meilleur choix
+            best = results.sort_values('Value (%)', ascending=False).iloc[0]
+            if best['Value (%)'] > 0:
+                st.success(f"🔥 VALUE DÉTECTÉE : {best['Market']} à {best['Cote']} (ROI attendu : {best['Value (%)']}%)")
+            else:
+                st.warning("Aucune value nette détectée sur ces cotes.")
+                
             st.dataframe(results[['Market', 'Cote', 'IA Proba (%)', 'Value (%)']], use_container_width=True)
+            
         except Exception as e:
             st.error(f"Erreur d'analyse : {e}")
