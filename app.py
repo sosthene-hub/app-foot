@@ -45,9 +45,20 @@ if 'df_stats' in st.session_state:
     oN = c2.number_input("N", value=3.0)
     o2 = c3.number_input("2", value=3.0)
 
-    if st.button("🔍 ANALYSER LA VALUE"):
+        if st.button("🔍 ANALYSER LA VALUE"):
         strengths, avg_h, avg_a = calculate_global_strengths(df)
         matrix = predict_match_matrix(home, away, strengths, avg_h, avg_a)
         results = analyze_all_markets(matrix, {'1': o1, 'N': oN, '2': o2})
-        st.success(f"🤖 CONSEIL : {results.iloc[0]['Market']} (ROI: {results.iloc[0]['Value (%)']}%)")
-        st.dataframe(results[['Market', 'Cote', 'Value (%)']])
+        
+        # --- AJOUT DES PROBABILITÉS EN % ---
+        results['IA Proba (%)'] = (results['Prob_IA'] * 100).round(1)
+        
+        best = results.iloc[0]
+        st.success(f"🤖 CONSEIL : {best['Market']} (ROI: {best['Value (%)']}%)")
+        
+        # Affichage du tableau avec la nouvelle colonne
+        st.dataframe(results[['Market', 'Cote', 'IA Proba (%)', 'Value (%)']])
+        
+        for _, row in results.iterrows():
+            with st.expander(f"{row['Market']} | Proba: {row['IA Proba (%)']}%"):
+                st.write(f"Cote minimale conseillée : **{round(1/row['Prob_IA'], 2)}**")
