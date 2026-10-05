@@ -18,8 +18,12 @@ def fetch_free_data(league_code):
             a_m = df[df['AwayTeam'] == team]
             stats.append({
                 'Team': team,
-                'GP_H': len(h_m), 'GF_H': h_m['FTHG'].sum(), 'GA_H': h_m['FTAG'].sum(),
-                'GP_A': len(a_m), 'GF_A': a_m['FTAG'].sum(), 'GA_A': a_m['FTHG'].sum()
+                'GP_H': len(h_m), 
+                'GF_H': h_m['FTHG'].sum(), 
+                'GA_H': h_m['FTAG'].sum(),
+                'GP_A': len(a_m), 
+                'GF_A': a_m['FTAG'].sum(), 
+                'GA_A': a_m['FTHG'].sum()
             })
         return pd.DataFrame(stats)
     except:
@@ -50,34 +54,50 @@ class GlobalScraper:
             r = requests.get(self.base_url + "standings", headers=self.headers, params=params, timeout=10)
             data = r.json()
             
-            # Diagnostic : On vérifie si l'API a renvoyé une erreur
             if data.get('errors'):
                 return f"Erreur API: {data['errors']}"
 
             response = data.get('response', [])
             if not response:
-                return "Aucune donnée trouvée dans la réponse API."
+                return "L'API n'a renvoyé aucune réponse pour cette sélection."
 
-            # Extraction sécurisée du classement
             league_obj = response[0].get('league', {})
             standings_list = league_obj.get('standings', [])
             
             if not standings_list:
-                return "Le classement (standings) est vide pour cette ligue/saison."
+                return "Le classement est vide pour cette saison."
 
-            # Le classement est souvent une liste de listes [[team1, team2...]]
+            # Le classement est dans le premier élément
             table = standings_list[0]
             stats = []
+            
             for item in table:
+                # Utilisation de .get() pour éviter l'erreur 'against'
+                team_name = item.get('team', {}).get('name', 'Inconnu')
+                
+                home_data = item.get('home', {})
+                away_data = item.get('away', {})
+                
+                home_goals = home_data.get('goals', {})
+                away_goals = away_data.get('goals', {})
+                
                 stats.append({
-                    'Team': item['team']['name'],
-                    'GP_H': item['home']['played'],
-                    'GF_H': item['home']['goals']['for'],
-                    'GA_H': item['home']['goals']['against'],
-                    'GP_A': item['away']['played'],
-                    'GF_A': item['away']['goals']['for'],
-                    'GA_A': item['away']['against']
+                    'Team': team_name,
+                    'GP_H': home_data.get('played', 0),
+                    'GF_H': home_goals.get('for', 0),
+                    'GA_H': home_goals.get('against', 0), # ICI ETAIT L'ERREUR
+                    'GP_A': away_data.get('played', 0),
+                    'GF_A': away_goals.get('for', 0),
+                    'GA_A': away_goals.get('against', 0)  # ICI ETAIT L'ERREUR
                 })
-            return pd.DataFrame(stats)
+            
+            df = pd.DataFrame(stats)
+            # On retire les équipes qui n'ont pas encore joué pour éviter les divisions par zéro
+            df = df[(df['GP_H'] + df['GP_A']) > 0]
+            
+            if df.empty:
+                return "Toutes les équipes ont 0 match joué. Stats insuffisantes."
+                
+            return df
         except Exception as e:
             return f"Erreur technique : {str(e)}"
