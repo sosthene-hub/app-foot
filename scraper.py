@@ -19,8 +19,7 @@ def fetch_free_data(league_code):
             stats.append({
                 'Team': team,
                 'GP_H': len(h_m), 'GF_H': h_m['FTHG'].sum(), 'GA_H': h_m['FTAG'].sum(),
-                'GP_A': len(a_m), 'GF_A': a_m['GF_A'].sum() if 'GF_A' in a_m else a_m['FTAG'].sum(),
-                'GA_A': a_m['GA_A'].sum() if 'GA_A' in a_m else a_m['FTHG'].sum()
+                'GP_A': len(a_m), 'GF_A': a_m['FTAG'].sum(), 'GA_A': a_m['FTHG'].sum()
             })
         return pd.DataFrame(stats)
     except:
@@ -47,20 +46,29 @@ class GlobalScraper:
 
     def get_standings(self, league_id, season):
         try:
-            # L'astuce est ici : on force la saison en entier (int)
             params = {'league': int(league_id), 'season': int(season)}
             r = requests.get(self.base_url + "standings", headers=self.headers, params=params, timeout=10)
-            
             data = r.json()
+            
+            # Diagnostic : On vérifie si l'API a renvoyé une erreur
+            if data.get('errors'):
+                return f"Erreur API: {data['errors']}"
+
             response = data.get('response', [])
-            
             if not response:
-                return None
+                return "Aucune donnée trouvée dans la réponse API."
+
+            # Extraction sécurisée du classement
+            league_obj = response[0].get('league', {})
+            standings_list = league_obj.get('standings', [])
             
-            # Structure API-Sports: response[0] -> league -> standings[0]
-            standings = response[0]['league']['standings'][0]
+            if not standings_list:
+                return "Le classement (standings) est vide pour cette ligue/saison."
+
+            # Le classement est souvent une liste de listes [[team1, team2...]]
+            table = standings_list[0]
             stats = []
-            for item in standings:
+            for item in table:
                 stats.append({
                     'Team': item['team']['name'],
                     'GP_H': item['home']['played'],
@@ -72,5 +80,4 @@ class GlobalScraper:
                 })
             return pd.DataFrame(stats)
         except Exception as e:
-            print(f"Erreur technique: {e}")
-            return None
+            return f"Erreur technique : {str(e)}"
