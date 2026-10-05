@@ -1,21 +1,10 @@
 import pandas as pd
 import requests
 
-# Catalogue Europe Gratuit (En secours)
 FREE_LEAGUES = {
-    "🇫🇷 France - L1": "F1",
-    "🇫🇷 France - L2": "F2",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - P1": "E0",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - D2": "E1",
-    "🇪🇸 Espagne - L1": "SP1",
-    "🇪🇸 Espagne - L2": "SP2",
-    "🇮🇹 Italie - A": "I1",
-    "🇮🇹 Italie - B": "I2",
-    "🇩🇪 Allemagne - L1": "D1",
-    "🇩🇪 Allemagne - L2": "D2",
-    "🇵🇹 Portugal - L1": "P1",
-    "🇳🇱 Pays-Bas - L1": "N1",
-    "🇧🇪 Belgique - L1": "B1"
+    "🇫🇷 France - L1": "F1", "🇫🇷 France - L2": "F2",
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - P1": "E0", "🇪🇸 Espagne - L1": "SP1",
+    "🇮🇹 Italie - A": "I1", "🇩🇪 Allemagne - L1": "D1"
 }
 
 def fetch_free_data(league_code):
@@ -25,16 +14,13 @@ def fetch_free_data(league_code):
         df = df.dropna(subset=['FTHG', 'FTAG'])
         stats = []
         for team in df['HomeTeam'].unique():
-            h_matches = df[df['HomeTeam'] == team]
-            a_matches = df[df['AwayTeam'] == team]
+            h_m = df[df['HomeTeam'] == team]
+            a_m = df[df['AwayTeam'] == team]
             stats.append({
                 'Team': team,
-                'GP_H': len(h_matches),
-                'GF_H': h_matches['FTHG'].sum(),
-                'GA_H': h_matches['FTAG'].sum(),
-                'GP_A': len(a_matches),
-                'GF_A': a_matches['FTAG'].sum(),
-                'GA_A': a_matches['FTHG'].sum()
+                'GP_H': len(h_m), 'GF_H': h_m['FTHG'].sum(), 'GA_H': h_m['FTAG'].sum(),
+                'GP_A': len(a_m), 'GF_A': a_m['GF_A'].sum() if 'GF_A' in a_m else a_m['FTAG'].sum(),
+                'GA_A': a_m['GA_A'].sum() if 'GA_A' in a_m else a_m['FTHG'].sum()
             })
         return pd.DataFrame(stats)
     except:
@@ -48,56 +34,43 @@ class GlobalScraper:
     def get_countries(self):
         try:
             r = requests.get(self.base_url + "countries", headers=self.headers, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                return sorted(data.get('response', []), key=lambda x: x['name'])
-            return []
+            return sorted(r.json().get('response', []), key=lambda x: x['name'])
         except:
             return []
 
     def get_leagues(self, country_name):
         try:
             r = requests.get(self.base_url + "leagues", headers=self.headers, params={'country': country_name}, timeout=10)
-            if r.status_code == 200:
-                return r.json().get('response', [])
-            return []
+            return r.json().get('response', [])
         except:
             return []
 
-    def get_standings(self, league_id, season=2024):
+    def get_standings(self, league_id, season):
         try:
-            params = {'league': league_id, 'season': season}
+            # L'astuce est ici : on force la saison en entier (int)
+            params = {'league': int(league_id), 'season': int(season)}
             r = requests.get(self.base_url + "standings", headers=self.headers, params=params, timeout=10)
             
-            if r.status_code == 200:
-                data_json = r.json()
-                response = data_json.get('response', [])
-                
-                if not response:
-                    return None
-                
-                # Extraction du tableau des classements
-                league_data = response[0].get('league', {})
-                standings = league_data.get('standings', [])
-                
-                if not standings:
-                    return None
-                
-                # L'API renvoie parfois une liste de listes
-                table = standings[0]
-                stats = []
-                for team in table:
-                    stats.append({
-                        'Team': team['team']['name'],
-                        'GP_H': team['home']['played'],
-                        'GF_H': team['home']['goals']['for'],
-                        'GA_H': team['home']['goals']['against'],
-                        'GP_A': team['away']['played'],
-                        'GF_A': team['away']['goals']['for'],
-                        'GA_A': team['away']['against']
-                    })
-                return pd.DataFrame(stats)
-            return None
+            data = r.json()
+            response = data.get('response', [])
+            
+            if not response:
+                return None
+            
+            # Structure API-Sports: response[0] -> league -> standings[0]
+            standings = response[0]['league']['standings'][0]
+            stats = []
+            for item in standings:
+                stats.append({
+                    'Team': item['team']['name'],
+                    'GP_H': item['home']['played'],
+                    'GF_H': item['home']['goals']['for'],
+                    'GA_H': item['home']['goals']['against'],
+                    'GP_A': item['away']['played'],
+                    'GF_A': item['away']['goals']['for'],
+                    'GA_A': item['away']['against']
+                })
+            return pd.DataFrame(stats)
         except Exception as e:
-            print(f"Erreur Scraper: {e}")
+            print(f"Erreur technique: {e}")
             return None
