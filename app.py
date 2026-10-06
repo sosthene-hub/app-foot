@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
-from scraper import GlobalScraper, fetch_free_data
+from scraper import GlobalScraper, fetch_free_data, FREE_LEAGUES
 from analytics import calculate_global_strengths, predict_match_matrix, analyze_all_markets
 
 st.set_page_config(page_title="FootValue Pro IA", layout="wide")
 
-# Affichage du Titre
-st.title("⚽ FootValue Pro (Analyseur Expert)")
+st.markdown("<h1 style='text-align: center; color: #2E86C1;'>⚽ FootValue Pro (Analyseur Expert)</h1>", unsafe_allow_html=True)
 
 if 'df_stats' not in st.session_state: st.session_state.df_stats = None
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
@@ -17,71 +16,59 @@ with st.sidebar:
     if api_key: st.session_state.api_key = api_key
     
     st.divider()
-    st.subheader("🌐 Sélection du mode")
-    
-    # Bouton Mode Gratuit
-    if st.button("🔄 Activer Mode Gratuit (France L1)"):
-        with st.spinner("Chargement des données gratuites..."):
-            st.session_state.df_stats = fetch_free_data("F1")
-            st.session_state.current_league_id = 0
-            st.success("Mode Gratuit activé !")
+    st.subheader("🌐 Mode Gratuit")
+    free_league = st.selectbox("Choisir une ligue", list(FREE_LEAGUES.keys()))
+    if st.button("🔄 Charger Ligue Gratuite"):
+        st.session_state.df_stats = fetch_free_data(FREE_LEAGUES[free_league])
+        st.session_state.current_league_id = 0
+        st.success("Données CSV chargées")
 
-    # Bloc API (ne s'affiche que si une clé est entrée)
     if st.session_state.api_key:
-        try:
-            scraper = GlobalScraper(st.session_state.api_key)
-            countries = scraper.get_countries()
-            if countries:
-                c_names = [c['name'] for c in countries]
-                sel_country = st.selectbox("Pays", c_names, index=c_names.index('France') if 'France' in c_names else 0)
-                leagues = scraper.get_leagues(sel_country)
-                if leagues:
-                    l_map = {l['league']['name']: l['league']['id'] for l in leagues}
-                    sel_div = st.selectbox("Division", list(l_map.keys()))
-                    sel_season = st.selectbox("Saison", [2024, 2023])
-                    if st.button("🚀 CHARGER VIA API"):
-                        data = scraper.get_standings(l_map[sel_div], sel_season)
-                        if isinstance(data, pd.DataFrame):
-                            st.session_state.df_stats = data
-                            st.session_state.current_league_id = l_map[sel_div]
-                            st.session_state.current_season = sel_season
-                        else:
-                            st.error("Clé API invalide ou expirée.")
-        except:
-            st.error("Erreur de connexion à l'API.")
+        st.divider()
+        st.subheader("🚀 Mode API Premium")
+        scraper = GlobalScraper(st.session_state.api_key)
+        countries = scraper.get_countries()
+        if countries:
+            c_names = [c['name'] for c in countries]
+            sel_country = st.selectbox("Pays", c_names, index=c_names.index('France') if 'France' in c_names else 0)
+            leagues = scraper.get_leagues(sel_country)
+            if leagues:
+                l_map = {l['league']['name']: l['league']['id'] for l in leagues}
+                sel_div = st.selectbox("Division", list(l_map.keys()))
+                sel_season = st.selectbox("Saison", [2024, 2023])
+                if st.button("🚀 CHARGER VIA API"):
+                    data = scraper.get_standings(l_map[sel_div], sel_season)
+                    if isinstance(data, pd.DataFrame):
+                        st.session_state.df_stats = data
+                        st.session_state.current_league_id = l_map[sel_div]
+                        st.session_state.current_season = sel_season
+                        st.success("Données API chargées")
 
-# Interface principale
 if st.session_state.df_stats is not None:
     df = st.session_state.df_stats
     teams = sorted(df['Team'].unique())
-    
     col_m, col_o = st.columns([2, 1])
     
     with col_m:
-        st.subheader("📊 Analyse du Match")
+        st.subheader("📊 Match & Compo")
         c_h, c_a = st.columns(2)
         home = c_h.selectbox("🏠 Domicile", teams)
         away = c_a.selectbox("🚀 Extérieur", teams, index=1 if len(teams)>1 else 0)
         
-        # Récupération sécurisée ID
-        id_h = df[df['Team'] == home]['ID'].values[0] if 'ID' in df.columns else 0
-        id_a = df[df['Team'] == away]['ID'].values[0] if 'ID' in df.columns else 0
+        id_h = df[df['Team'] == home]['ID'].values[0]
+        id_a = df[df['Team'] == away]['ID'].values[0]
         
         abs_h, abs_a = [], []
-        # On ne cherche les absents que si on a une clé ET qu'on n'est pas en mode gratuit (ID != 0)
+        # Le code s'adapte : il ne cherche les absents que si on a une clé ET que l'ID n'est pas 0
         if st.session_state.api_key and id_h != 0:
-            try:
-                scr = GlobalScraper(st.session_state.api_key)
-                with st.spinner("Recherche des blessés..."):
-                    k_h = scr.get_key_players(st.session_state.current_league_id, st.session_state.current_season, id_h)
-                    i_h = scr.get_absentees(st.session_state.current_league_id, st.session_state.current_season, id_h)
-                    abs_h = [p for p in i_h if p in k_h]
-                    
-                    k_a = scr.get_key_players(st.session_state.current_league_id, st.session_state.current_season, id_a)
-                    i_a = scr.get_absentees(st.session_state.current_league_id, st.session_state.current_season, id_a)
-                    abs_a = [p for p in i_a if p in k_a]
-            except:
-                st.warning("Impossible de récupérer les absents (Clé API expirée ?)")
+            scr = GlobalScraper(st.session_state.api_key)
+            with st.spinner("Analyse API des blessés..."):
+                k_h = scr.get_key_players(st.session_state.current_league_id, st.session_state.current_season, id_h)
+                i_h = scr.get_absentees(st.session_state.current_league_id, st.session_state.current_season, id_h)
+                abs_h = [p for p in i_h if p in k_h]
+                k_a = scr.get_key_players(st.session_state.current_league_id, st.session_state.current_season, id_a)
+                i_a = scr.get_absentees(st.session_state.current_league_id, st.session_state.current_season, id_a)
+                abs_a = [p for p in i_a if p in k_a]
         
         c_h.info(f"**Absents :** {', '.join(abs_h) if abs_h else 'Aucun'}")
         c_a.info(f"**Absents :** {', '.join(abs_a) if abs_a else 'Aucun'}")
@@ -98,26 +85,9 @@ if st.session_state.df_stats is not None:
         strengths, avg_h, avg_a = calculate_global_strengths(df)
         matrix = predict_match_matrix(home, away, strengths, avg_h, avg_a, abs_h, abs_a)
         res = analyze_all_markets(matrix, {'1':c1, 'N':cN, '2':c2, 'Over 2.5':cO, 'BTTS (Oui)':cB})
-        
-        # Préparation affichage
         res['IA Proba (%)'] = (res['Prob_IA'] * 100).round(1)
         
-        # Affichage avec couleurs automatiques (Nouvelle méthode Streamlit)
-        st.dataframe(
-            res[['Market', 'Cote', 'IA Proba (%)', 'Value (%)']],
-            column_config={
-                "Value (%)": st.column_config.NumberColumn(
-                    "Value (%)",
-                    format="%.2f %%",
-                    help="Vert si le pari est rentable"
-                )
-            },
-            use_container_width=True
-        )
-        
-        # Conseil final
-        best_value = res.loc[res['Value (%)'].idxmax()]
-        if best_value['Value (%)'] > 0:
-            st.success(f"🎯 Conseil IA : Le marché **{best_value['Market']}** présente la meilleure value ({best_value['Value (%)']}%)")
-        else:
-            st.warning("⚠️ Aucun pari de valeur trouvé selon l'IA.")
+        def color_val(v):
+            return f"color: {'#27AE60' if v > 0 else '#E74C3C'}; font-weight: bold;"
+
+        st.dataframe(res[['Market', 'Cote', 'IA Proba (%)', 'Value (%)']].style.map(color_val, subset=['Value (%)']), use_container_width=True)
