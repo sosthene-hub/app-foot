@@ -1,6 +1,32 @@
 import pandas as pd
 import requests
 
+FREE_LEAGUES = {
+    "🇫🇷 France - L1": "F1", "🇫🇷 France - L2": "F2",
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - P1": "E0", "🇪🇸 Espagne - L1": "SP1",
+    "🇮🇹 Italie - A": "I1", "🇩🇪 Allemagne - L1": "D1"
+}
+
+def fetch_free_data(league_code):
+    url = f"https://www.football-data.co.uk/mmz4281/2425/{league_code}.csv"
+    try:
+        df = pd.read_csv(url)
+        df = df.dropna(subset=['FTHG', 'FTAG'])
+        stats = []
+        for team in df['HomeTeam'].unique():
+            h_m = df[df['HomeTeam'] == team]
+            a_m = df[df['AwayTeam'] == team]
+            stats.append({
+                'Team': team, 
+                'ID': 0, # Pas d'ID en mode CSV
+                'GP_H': len(h_m), 'GF_H': h_m['FTHG'].sum(), 'GA_H': h_m['FTAG'].sum(),
+                'GP_A': len(a_m), 'GF_A': a_m['FTAG'].sum(), 'GA_A': a_m['FTHG'].sum(),
+                'Form': ""
+            })
+        return pd.DataFrame(stats)
+    except:
+        return None
+
 class GlobalScraper:
     def __init__(self, api_key):
         self.headers = {'x-apisports-key': api_key.strip()}
@@ -24,14 +50,14 @@ class GlobalScraper:
             r = requests.get(self.base_url + "standings", headers=self.headers, params=params, timeout=10)
             data = r.json()
             response = data.get('response', [])
-            if not response: return None
+            if not response: return "Aucune donnée API."
             
             table = response[0].get('league', {}).get('standings', [])[0]
             stats = []
             for item in table:
                 stats.append({
                     'Team': item['team']['name'],
-                    'ID': item['team']['id'], # Garder l'ID pour les joueurs
+                    'ID': item['team']['id'], # <-- L'ID EST BIEN RÉCUPÉRÉ ICI
                     'GP_H': item['home']['played'],
                     'GF_H': item['home']['goals']['for'],
                     'GA_H': item['home']['goals']['against'],
@@ -44,22 +70,19 @@ class GlobalScraper:
         except Exception as e: return str(e)
 
     def get_absentees(self, league_id, season, team_id):
-        """Récupère les blessés et suspendus"""
+        if not team_id or team_id == 0: return []
         try:
             params = {'league': league_id, 'season': season, 'team': team_id}
             r = requests.get(self.base_url + "injuries", headers=self.headers, params=params, timeout=10)
-            injuries = r.json().get('response', [])
-            return [i['player']['name'] for i in injuries]
+            return [i['player']['name'] for i in r.json().get('response', [])]
         except: return []
 
     def get_key_players(self, league_id, season, team_id):
-        """Récupère les joueurs les plus importants (buteurs et temps de jeu)"""
+        if not team_id or team_id == 0: return []
         try:
             params = {'league': league_id, 'season': season, 'team': team_id}
             r = requests.get(self.base_url + "players", headers=self.headers, params=params, timeout=10)
             players = r.json().get('response', [])
-            
-            # Trier par buts puis par minutes
-            sorted_players = sorted(players, key=lambda x: (x['statistics'][0]['goals']['total'] or 0), reverse=True)
-            return [p['player']['name'] for p in sorted_players[:5]] # Top 5 joueurs
+            sorted_p = sorted(players, key=lambda x: (x['statistics'][0]['goals']['total'] or 0), reverse=True)
+            return [p['player']['name'] for p in sorted_p[:5]]
         except: return []
