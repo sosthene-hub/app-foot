@@ -1,34 +1,6 @@
 import pandas as pd
 import requests
 
-FREE_LEAGUES = {
-    "🇫🇷 France - L1": "F1", "🇫🇷 France - L2": "F2",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - P1": "E0", "🇪🇸 Espagne - L1": "SP1",
-    "🇮🇹 Italie - A": "I1", "🇩🇪 Allemagne - L1": "D1"
-}
-
-def fetch_free_data(league_code):
-    url = f"https://www.football-data.co.uk/mmz4281/2425/{league_code}.csv"
-    try:
-        df = pd.read_csv(url)
-        df = df.dropna(subset=['FTHG', 'FTAG'])
-        stats = []
-        for team in df['HomeTeam'].unique():
-            h_m = df[df['HomeTeam'] == team]
-            a_m = df[df['AwayTeam'] == team]
-            stats.append({
-                'Team': team,
-                'GP_H': len(h_m), 
-                'GF_H': h_m['FTHG'].sum(), 
-                'GA_H': h_m['FTAG'].sum(),
-                'GP_A': len(a_m), 
-                'GF_A': a_m['FTAG'].sum(), 
-                'GA_A': a_m['FTHG'].sum()
-            })
-        return pd.DataFrame(stats)
-    except:
-        return None
-
 class GlobalScraper:
     def __init__(self, api_key):
         self.headers = {'x-apisports-key': api_key.strip()}
@@ -38,66 +10,56 @@ class GlobalScraper:
         try:
             r = requests.get(self.base_url + "countries", headers=self.headers, timeout=10)
             return sorted(r.json().get('response', []), key=lambda x: x['name'])
-        except:
-            return []
+        except: return []
 
     def get_leagues(self, country_name):
         try:
             r = requests.get(self.base_url + "leagues", headers=self.headers, params={'country': country_name}, timeout=10)
             return r.json().get('response', [])
-        except:
-            return []
+        except: return []
 
     def get_standings(self, league_id, season):
         try:
             params = {'league': int(league_id), 'season': int(season)}
             r = requests.get(self.base_url + "standings", headers=self.headers, params=params, timeout=10)
             data = r.json()
-            
-            if data.get('errors'):
-                return f"Erreur API: {data['errors']}"
-
             response = data.get('response', [])
-            if not response:
-                return "L'API n'a renvoyé aucune réponse pour cette sélection."
-
-            league_obj = response[0].get('league', {})
-            standings_list = league_obj.get('standings', [])
+            if not response: return None
             
-            if not standings_list:
-                return "Le classement est vide pour cette saison."
-
-            # Le classement est dans le premier élément
-            table = standings_list[0]
+            table = response[0].get('league', {}).get('standings', [])[0]
             stats = []
-            
             for item in table:
-                # Utilisation de .get() pour éviter l'erreur 'against'
-                team_name = item.get('team', {}).get('name', 'Inconnu')
-                
-                home_data = item.get('home', {})
-                away_data = item.get('away', {})
-                
-                home_goals = home_data.get('goals', {})
-                away_goals = away_data.get('goals', {})
-                
                 stats.append({
-                    'Team': team_name,
-                    'GP_H': home_data.get('played', 0),
-                    'GF_H': home_goals.get('for', 0),
-                    'GA_H': home_goals.get('against', 0), # ICI ETAIT L'ERREUR
-                    'GP_A': away_data.get('played', 0),
-                    'GF_A': away_goals.get('for', 0),
-                    'GA_A': away_goals.get('against', 0)  # ICI ETAIT L'ERREUR
+                    'Team': item['team']['name'],
+                    'ID': item['team']['id'], # Garder l'ID pour les joueurs
+                    'GP_H': item['home']['played'],
+                    'GF_H': item['home']['goals']['for'],
+                    'GA_H': item['home']['goals']['against'],
+                    'GP_A': item['away']['played'],
+                    'GF_A': item['away']['goals']['for'],
+                    'GA_A': item['away']['against'],
+                    'Form': item.get('form', "")
                 })
+            return pd.DataFrame(stats)
+        except Exception as e: return str(e)
+
+    def get_absentees(self, league_id, season, team_id):
+        """Récupère les blessés et suspendus"""
+        try:
+            params = {'league': league_id, 'season': season, 'team': team_id}
+            r = requests.get(self.base_url + "injuries", headers=self.headers, params=params, timeout=10)
+            injuries = r.json().get('response', [])
+            return [i['player']['name'] for i in injuries]
+        except: return []
+
+    def get_key_players(self, league_id, season, team_id):
+        """Récupère les joueurs les plus importants (buteurs et temps de jeu)"""
+        try:
+            params = {'league': league_id, 'season': season, 'team': team_id}
+            r = requests.get(self.base_url + "players", headers=self.headers, params=params, timeout=10)
+            players = r.json().get('response', [])
             
-            df = pd.DataFrame(stats)
-            # On retire les équipes qui n'ont pas encore joué pour éviter les divisions par zéro
-            df = df[(df['GP_H'] + df['GP_A']) > 0]
-            
-            if df.empty:
-                return "Toutes les équipes ont 0 match joué. Stats insuffisantes."
-                
-            return df
-        except Exception as e:
-            return f"Erreur technique : {str(e)}"
+            # Trier par buts puis par minutes
+            sorted_players = sorted(players, key=lambda x: (x['statistics'][0]['goals']['total'] or 0), reverse=True)
+            return [p['player']['name'] for p in sorted_players[:5]] # Top 5 joueurs
+        except: return []
