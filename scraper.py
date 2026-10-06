@@ -1,12 +1,10 @@
 import pandas as pd
 import requests
 
-# Ces ligues fonctionnent sans clé API
 FREE_LEAGUES = {
     "🇫🇷 France - Ligue 1": "F1",
     "🇫🇷 France - Ligue 2": "F2",
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - Premier League": "E0",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - Championship": "E1",
     "🇪🇸 Espagne - La Liga": "SP1",
     "🇮🇹 Italie - Serie A": "I1",
     "🇩🇪 Allemagne - Bundesliga": "D1",
@@ -33,15 +31,12 @@ class GlobalScraper:
 
     def get_standings(self, league_id, season):
         try:
-            params = {'league': int(league_id), 'season': int(season)}
-            r = requests.get(self.base_url + "standings", headers=self.headers, params=params, timeout=7)
-            data = r.json()
-            table = data['response'][0]['league']['standings'][0]
+            r = requests.get(self.base_url + "standings", headers=self.headers, params={'league': int(league_id), 'season': int(season)}, timeout=7)
+            table = r.json()['response'][0]['league']['standings'][0]
             stats = []
             for item in table:
                 stats.append({
-                    'Team': item['team']['name'], 
-                    'ID': item['team']['id'], # L'ID est crucial pour les blessés
+                    'Team': item['team']['name'], 'ID': item['team']['id'],
                     'GP_H': item['home']['played'], 'GF_H': item['home']['goals']['for'],
                     'GA_H': item['home']['goals']['against'], 'GP_A': item['away']['played'],
                     'GF_A': item['away']['goals']['for'], 'GA_A': item['away']['goals']['against']
@@ -52,16 +47,14 @@ class GlobalScraper:
     def get_absentees(self, l_id, s, t_id):
         try:
             r = requests.get(self.base_url + "injuries", headers=self.headers, params={'league':l_id,'season':s,'team':t_id}, timeout=5)
-            names = {i['player']['name'] for i in r.json().get('response', [])}
-            return sorted(list(names))
+            return sorted(list({i['player']['name'] for i in r.json().get('response', [])}))
         except: return []
 
     def get_key_players(self, l_id, s, t_id):
         try:
             r = requests.get(self.base_url + "players", headers=self.headers, params={'league':l_id,'season':s,'team':t_id}, timeout=5)
-            players = r.json().get('response', [])
-            sorted_p = sorted(players, key=lambda x: (x['statistics'][0]['goals']['total'] or 0), reverse=True)
-            return [p['player']['name'] for p in sorted_p[:8]]
+            players = sorted(r.json().get('response', []), key=lambda x: (x['statistics'][0]['goals']['total'] or 0), reverse=True)
+            return [p['player']['name'] for p in players[:8]]
         except: return []
 
 def fetch_free_data(league_code):
@@ -71,10 +64,7 @@ def fetch_free_data(league_code):
         stats = []
         for team in df['HomeTeam'].unique():
             h, a = df[df['HomeTeam']==team], df[df['AwayTeam']==team]
-            stats.append({
-                'Team': team, 'ID': 0, # ID à 0 en mode gratuit
-                'GP_H': len(h), 'GF_H': h['FTHG'].sum(), 'GA_H': h['FTAG'].sum(),
-                'GP_A': len(a), 'GF_A': a['FTAG'].sum(), 'GA_A': a['FTHG'].sum()
-            })
+            stats.append({'Team': team, 'ID': 0, 'GP_H': len(h), 'GF_H': h['FTHG'].sum(), 'GA_H': h['FTAG'].sum(),
+                          'GP_A': len(a), 'GF_A': a['FTAG'].sum(), 'GA_A': a['FTHG'].sum()})
         return pd.DataFrame(stats)
     except: return None
