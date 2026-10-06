@@ -1,32 +1,6 @@
 import pandas as pd
 import requests
 
-FREE_LEAGUES = {
-    "🇫🇷 France - L1": "F1", "🇫🇷 France - L2": "F2",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre - P1": "E0", "🇪🇸 Espagne - L1": "SP1",
-    "🇮🇹 Italie - A": "I1", "🇩🇪 Allemagne - L1": "D1"
-}
-
-def fetch_free_data(league_code):
-    url = f"https://www.football-data.co.uk/mmz4281/2425/{league_code}.csv"
-    try:
-        df = pd.read_csv(url)
-        df = df.dropna(subset=['FTHG', 'FTAG'])
-        stats = []
-        for team in df['HomeTeam'].unique():
-            h_m = df[df['HomeTeam'] == team]
-            a_m = df[df['AwayTeam'] == team]
-            stats.append({
-                'Team': team, 
-                'ID': 0, # Pas d'ID en mode CSV
-                'GP_H': len(h_m), 'GF_H': h_m['FTHG'].sum(), 'GA_H': h_m['FTAG'].sum(),
-                'GP_A': len(a_m), 'GF_A': a_m['FTAG'].sum(), 'GA_A': a_m['FTHG'].sum(),
-                'Form': ""
-            })
-        return pd.DataFrame(stats)
-    except:
-        return None
-
 class GlobalScraper:
     def __init__(self, api_key):
         self.headers = {'x-apisports-key': api_key.strip()}
@@ -57,13 +31,13 @@ class GlobalScraper:
             for item in table:
                 stats.append({
                     'Team': item['team']['name'],
-                    'ID': item['team']['id'], # <-- L'ID EST BIEN RÉCUPÉRÉ ICI
+                    'ID': item['team']['id'],
                     'GP_H': item['home']['played'],
                     'GF_H': item['home']['goals']['for'],
                     'GA_H': item['home']['goals']['against'],
                     'GP_A': item['away']['played'],
                     'GF_A': item['away']['goals']['for'],
-                    'GA_A': item['away']['against'],
+                    'GA_A': item['away']['goals']['against'], # Chemin corrigé
                     'Form': item.get('form', "")
                 })
             return pd.DataFrame(stats)
@@ -86,3 +60,19 @@ class GlobalScraper:
             sorted_p = sorted(players, key=lambda x: (x['statistics'][0]['goals']['total'] or 0), reverse=True)
             return [p['player']['name'] for p in sorted_p[:5]]
         except: return []
+
+def fetch_free_data(league_code):
+    url = f"https://www.football-data.co.uk/mmz4281/2425/{league_code}.csv"
+    try:
+        df = pd.read_csv(url)
+        df = df.dropna(subset=['FTHG', 'FTAG'])
+        stats = []
+        for team in df['HomeTeam'].unique():
+            h_m = df[df['HomeTeam'] == team]; a_m = df[df['AwayTeam'] == team]
+            stats.append({
+                'Team': team, 'ID': 0, 'GP_H': len(h_m), 'GF_H': h_m['FTHG'].sum(),
+                'GA_H': h_m['FTAG'].sum(), 'GP_A': len(a_m), 'GF_A': a_m['FTAG'].sum(),
+                'GA_A': a_m['FTHG'].sum(), 'Form': ""
+            })
+        return pd.DataFrame(stats)
+    except: return None
