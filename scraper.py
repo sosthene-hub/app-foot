@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+import streamlit as st
 
 FREE_LEAGUES = {
     "🇫🇷 France - Ligue 1": "F1",
@@ -17,22 +18,26 @@ class GlobalScraper:
         self.headers = {'x-apisports-key': api_key.strip()}
         self.base_url = "https://v3.football.api-sports.io/"
 
-    def get_countries(self):
+    @st.cache_data(ttl=86400) # Cache de 24h pour la liste des pays
+    def get_countries(_self):
         try:
-            r = requests.get(self.base_url + "countries", headers=self.headers, timeout=5)
+            r = requests.get(_self.base_url + "countries", headers=_self.headers, timeout=5)
             return sorted(r.json().get('response', []), key=lambda x: x['name'])
         except: return []
 
-    def get_leagues(self, country_name):
+    @st.cache_data(ttl=86400) # Cache de 24h pour les ligues
+    def get_leagues(_self, country_name):
         try:
-            r = requests.get(self.base_url + "leagues", headers=self.headers, params={'country': country_name}, timeout=5)
+            r = requests.get(_self.base_url + "leagues", headers=_self.headers, params={'country': country_name}, timeout=5)
             return r.json().get('response', [])
         except: return []
 
-    def get_standings(self, league_id, season):
+    @st.cache_data(ttl=3600) # Cache de 1h pour les classements
+    def get_standings(_self, league_id, season):
         try:
-            r = requests.get(self.base_url + "standings", headers=self.headers, params={'league': int(league_id), 'season': int(season)}, timeout=7)
-            table = r.json()['response'][0]['league']['standings'][0]
+            r = requests.get(_self.base_url + "standings", headers=_self.headers, params={'league': int(league_id), 'season': int(season)}, timeout=7)
+            data = r.json()
+            table = data['response'][0]['league']['standings'][0]
             stats = []
             for item in table:
                 stats.append({
@@ -44,19 +49,22 @@ class GlobalScraper:
             return pd.DataFrame(stats)
         except: return "Erreur API."
 
-    def get_absentees(self, l_id, s, t_id):
+    @st.cache_data(ttl=3600) # Cache de 1h pour les absents
+    def get_absentees(_self, l_id, s, t_id):
         try:
-            r = requests.get(self.base_url + "injuries", headers=self.headers, params={'league':l_id,'season':s,'team':t_id}, timeout=5)
+            r = requests.get(_self.base_url + "injuries", headers=_self.headers, params={'league':l_id,'season':s,'team':t_id}, timeout=5)
             return sorted(list({i['player']['name'] for i in r.json().get('response', [])}))
         except: return []
 
-    def get_key_players(self, l_id, s, t_id):
+    @st.cache_data(ttl=3600) # Cache de 1h pour les joueurs clés
+    def get_key_players(_self, l_id, s, t_id):
         try:
-            r = requests.get(self.base_url + "players", headers=self.headers, params={'league':l_id,'season':s,'team':t_id}, timeout=5)
+            r = requests.get(_self.base_url + "players", headers=_self.headers, params={'league':l_id,'season':s,'team':t_id}, timeout=5)
             players = sorted(r.json().get('response', []), key=lambda x: (x['statistics'][0]['goals']['total'] or 0), reverse=True)
             return [p['player']['name'] for p in players[:8]]
         except: return []
 
+@st.cache_data(ttl=3600)
 def fetch_free_data(league_code):
     url = f"https://www.football-data.co.uk/mmz4281/2425/{league_code}.csv"
     try:
