@@ -2,62 +2,87 @@ import numpy as np
 from scipy.stats import poisson
 import pandas as pd
 
-def calculate_form_factor(form_str):
-    if not form_str or not isinstance(form_str, str): return 1.0
-    recent_form = form_str[-5:]
-    pts = sum([3 if c=='W' else 1 if c=='D' else 0 for c in recent_form])
-    return 1 + (pts - 7.5) / 60 # Impact modéré de la forme
+def calculate_global_strengths(df):
+    """Calcule la force offensive et défensive de chaque équipe"""
+    # Calcul des moyennes globales de la ligue
+    total_gp_h = df['GP_H'].sum()
+    total_gp_a = df['GP_A'].sum()
+    
+    if total_gp_h == 0 or total_gp_a == 0:
+        return {}, 1.0, 1.0
+        
+    avg_gf_h = df['GF_H'].sum() / total_gp_h
+    avg_gf_a = df['GF_A'].sum() / total_gp_a
+    
+    strengths = {}
+    for _, row in df.iterrows():
+        team = row['Team']
+        # Calcul des ratios (Force)
+        s_off_h = (row['GF_H'] / row['GP_H']) / avg_gf_h if row['GP_H'] > 0 else 1
+        s_def_h = (row['GA_H'] / row['GP_H']) / avg_gf_a if row['GP_H'] > 0 else 1
+        s_off_a = (row['GF_A'] / row['GP_A']) / avg_gf_a if row['GP_A'] > 0 else 1
+        s_def_a = (row['GA_A'] / row['GP_A']) / avg_gf_h if row['GP_A'] > 0 else 1
+        
+        strengths[team] = {
+            'off_h': s_off_h, 'def_h': s_def_h,
+            'off_a': s_off_a, 'def_a': s_def_a
+        }
+    return strengths, avg_gf_h, avg_gf_a
 
-def calculate_global_strengths(df_stats):
-    df = df_stats.copy()
-    avg_gf_h = df['GF_H'].sum() / df['GP_H'].sum()
-    avg_gf_a = df['GF_A'].sum() / df['GP_A'].sum()
+def predict_match_matrix(home_team, away_team, strengths, avg_h, avg_a, abs_h, abs_a):
+    """Génère la matrice de probabilités de scores (Loi de Poisson)"""
+    # Récupération des forces
+    s_h = strengths.get(home_team, {'off_h': 1, 'def_h': 1, 'off_a': 1, 'def_a': 1})
+    s_a = strengths.get(away_team, {'off_h': 1, 'def_h': 1, 'off_a': 1, 'def_a': 1})
     
-    df['home_atk'] = (df['GF_H'] / df['GP_H']) / avg_gf_h
-    df['home_def'] = (df['GA_H'] / df['GP_H']) / avg_gf_a
-    df['away_atk'] = (df['GF_A'] / df['GP_A']) / avg_gf_a
-    df['away_def'] = (df['GA_A'] / df['GP_A']) / avg_gf_h
-    df['form_factor'] = df['Form'].apply(calculate_form_factor)
+    # Calcul de Lambda (espérance de buts)
+    lambda_h = s_h['off_h'] * s_a['def_a'] * avg_h
+    lambda_a = s_a['off_a'] * s_h['def_h'] * avg_a
     
-    return df.set_index('Team'), avg_gf_h, avg_gf_a
+    # --- IMPACT DES ABSENTS ---
+    # On réduit le potentiel offensif de 10% par joueur clé absent (max 30%)
+    penalty_h = min(len(abs_h) * 0.10, 0.30)
+    penalty_a = min(len(abs_a) * 0.10, 0.30)
+    
+    lambda_h *= (1 - penalty_h)
+    lambda_a *= (1 - penalty_a)
+    
+    # Création de la matrice 9x9 (de 0 à 8 buts pour chaque équipe)
+    matrix = np.outer(
+        poisson.pmf(range(9), lambda_h),
+        poisson.pmf(range(9), lambda_a)
+    )
+    return matrix
 
-def predict_match_matrix(home_team, away_team, strengths, avg_h, avg_a, absentees_h, absentees_a, max_goals=9):
-    st_h = strengths.loc[home_team]
-    st_a = strengths.loc[away_team]
+def analyze_all_markets(matrix, user_odds):
+    """Calcule les probabilités finales et la value pour chaque pari"""
+    prob_1 = np.sum(np.tril(matrix, -1)) # Somme triangle bas (1)
+    prob_N = np.sum(np.diag(matrix))     # Somme diagonale (N)
+    prob_2 = np.sum(np.triu(matrix, 1))  # Somme triangle haut (2)
     
-    # Calcul de l'impact des absents (Ex: -5% de force par joueur clé absent)
-    # Dans une version pro, on distinguerait Attaquant/Défenseur
-    impact_h = 1 - (len(absentees_h) * 0.05)
-    impact_a = 1 - (len(absentees_a) * 0.05)
+    # Over 2.5 buts (Somme des scores où i + j > 2)
+    prob_over25 = 0
+    for i in range(9):
+        for j in range(9):
+            if i + j > 2.5:
+                prob_over25 += matrix[i, j]
+                
+    # BTTS (Les deux marquent : score min 1-1)
+    prob_btts = np.sum(matrix[1:, 1:])
     
-    home_expectancy = st_h['home_atk'] * st_a['away_def'] * avg_h * st_h['form_factor'] * max(0.7, impact_h)
-    away_expectancy = st_a['away_atk'] * st_h['home_def'] * avg_a * st_a['form_factor'] * max(0.7, impact_a)
-    
-    home_probs = poisson.pmf(np.arange(max_goals), home_expectancy)
-    away_probs = poisson.pmf(np.arange(max_goals), away_expectancy)
-    
-    return np.outer(home_probs, away_probs)
-
-def analyze_all_markets(matrix, bookmaker_odds):
-    prob_1 = np.sum(np.tril(matrix, -1).T)
-    prob_N = np.sum(np.diagonal(matrix))
-    prob_2 = np.sum(np.triu(matrix, 1).T)
-    prob_over25 = 1 - (matrix[0,0] + matrix[0,1] + matrix[0,2] + matrix[1,0] + matrix[1,1] + matrix[2,0])
-    prob_btts = 1 - (np.sum(matrix[0, :]) + np.sum(matrix[:, 0]) - matrix[0,0])
-    
-    results = [
-        {'Market': '1', 'Prob_IA': prob_1},
-        {'Market': 'N', 'Prob_IA': prob_N},
-        {'Market': '2', 'Prob_IA': prob_2},
-        {'Market': 'Over 2.5', 'Prob_IA': prob_over25},
-        {'Market': 'BTTS (Oui)', 'Prob_IA': prob_btts}
+    markets = [
+        {'Market': '1', 'Prob_IA': prob_1, 'Cote': user_odds.get('1', 1.0)},
+        {'Market': 'N', 'Prob_IA': prob_N, 'Cote': user_odds.get('N', 1.0)},
+        {'Market': '2', 'Prob_IA': prob_2, 'Cote': user_odds.get('2', 1.0)},
+        {'Market': 'Over 2.5', 'Prob_IA': prob_over25, 'Cote': user_odds.get('Over 2.5', 1.0)},
+        {'Market': 'BTTS (Oui)', 'Prob_IA': prob_btts, 'Cote': user_odds.get('BTTS (Oui)', 1.0)}
     ]
     
-    analysis = []
-    for res in results:
-        if res['Market'] in bookmaker_odds:
-            odd = bookmaker_odds[res['Market']]
-            value = (res['Prob_IA'] * odd) - 1
-            res.update({'Cote': odd, 'Value (%)': round(value * 100, 2)})
-            analysis.append(res)
-    return pd.DataFrame(analysis).sort_values('Value (%)', ascending=False)
+    results = []
+    for m in markets:
+        # Formule de la Value : (Probabilité * Cote) - 1
+        val = (m['Prob_IA'] * m['Cote']) - 1
+        m['Value (%)'] = round(val * 100, 2)
+        results.append(m)
+        
+    return pd.DataFrame(results)
